@@ -248,3 +248,34 @@ def rename_item():
         return jsonify({'success': True, 'message': 'Item renamed successfully'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/read-file', methods=['GET'])
+def read_file():
+    path = request.args.get('path')
+    if not path:
+        return jsonify(success=False, error="Missing 'path' parameter"), 400
+
+    try:
+        sftp = create_ssh_connection().open_sftp()
+        with sftp.file(path, mode='r') as f:
+            content = f.read().decode('utf-8')
+        return jsonify(success=True, content=content)
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500
+
+@app.route('/api/update-file', methods=['POST'])
+def update_file():
+    data = request.get_json()
+    path = data.get('path')
+    content = data.get('content')
+
+    if not path or content is None:
+        return jsonify(success=False, error="Missing 'path' or 'content'"), 400
+
+    try:
+        sftp = create_ssh_connection().open_sftp()
+        with sftp.file(path, mode='w') as f:
+            f.write(content.encode('utf-8'))
+        return jsonify(success=True)
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500

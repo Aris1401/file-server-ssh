@@ -86,11 +86,23 @@ function addFileToList(file) {
                        <i class="bi bi-trash"></i>
                      </button>`;
 
+  var editBtn =
+    file.type === "file"
+      ? `<button class="btn btn-sm btn-outline-secondary me-1 edit-btn"
+                                                 data-path="${file.path}" 
+                                                 data-name="${file.name}" 
+                                                 title="Edit">
+                                                 <i class="bi bi-pencil-square"></i>
+                                              </button>`
+      : "";
+
   var actionCell = `<td class="text-end">
                         ${downloadBtn}
+                        ${editBtn}
                         ${renameBtn}
                         ${deleteBtn}
                       </td>`;
+
   $row.append(actionCell);
 
   $("table tbody").append($row);
@@ -381,6 +393,55 @@ function handleRename(oldPath, oldName, isFolder) {
   });
 }
 
+// DEdit
+$("table tbody").on("click", ".edit-btn", function (e) {
+  e.stopPropagation();
+
+  const path = $(this).data("path");
+  const name = $(this).data("name");
+
+  // Store path
+  $("#editFilePath").val(path);
+  $("#editFileModalLabel").text(`Editing: ${name}`);
+
+  // Fetch file content
+  $.get("/api/read-file", { path: path }, function (data) {
+    if (data.success) {
+      $("#editFileContent").val(data.content);
+      $("#editFileModal").modal("show");
+    } else {
+      alert("Failed to load file: " + data.error);
+    }
+  }).fail(function (jqXHR, textStatus, errorThrown) {
+    alert("Error loading file: " + errorThrown);
+  });
+});
+
+$("#editFileForm").on("submit", function (e) {
+  e.preventDefault();
+
+  const path = $("#editFilePath").val();
+  const content = $("#editFileContent").val();
+
+  $.ajax({
+    url: "/api/update-file",
+    method: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ path, content }),
+    success: function (response) {
+      if (response.success) {
+        $("#editFileModal").modal("hide");
+        loadFiles(currentPath); // Optional: refresh list
+      } else {
+        alert("Error saving file: " + response.error);
+      }
+    },
+    error: function (jqXHR, textStatus, errorThrown) {
+      alert("Failed to save file: " + errorThrown);
+    },
+  });
+});
+
 // Delegate click event for folder rows.
 $("table tbody").on("click", "tr[data-dir]", function (e) {
   // Prevent click if user clicks on an interactive element like a button or link.
@@ -422,22 +483,22 @@ $("#fileUpload").on("change", function () {
   }
 });
 
-$("table tbody").on("click", ".delete-btn", function(e) {
-    e.stopPropagation(); // Prevent row click for folders
-    const path = $(this).data('path');
-    const name = $(this).data('name');
-    const isFolder = $(this).data('type') === 'folder';
-    handleDelete(path, name, isFolder);
-  });
-  
-  // Rename button click handler - using event delegation
-  $("table tbody").on("click", ".rename-btn", function(e) {
-    e.stopPropagation(); // Prevent row click for folders
-    const path = $(this).data('path');
-    const name = $(this).data('name');
-    const isFolder = $(this).data('type') === 'folder';
-    handleRename(path, name, isFolder);
-  });
+$("table tbody").on("click", ".delete-btn", function (e) {
+  e.stopPropagation(); // Prevent row click for folders
+  const path = $(this).data("path");
+  const name = $(this).data("name");
+  const isFolder = $(this).data("type") === "folder";
+  handleDelete(path, name, isFolder);
+});
+
+// Rename button click handler - using event delegation
+$("table tbody").on("click", ".rename-btn", function (e) {
+  e.stopPropagation(); // Prevent row click for folders
+  const path = $(this).data("path");
+  const name = $(this).data("name");
+  const isFolder = $(this).data("type") === "folder";
+  handleRename(path, name, isFolder);
+});
 
 $(document).ready(function () {
   // ----------------------------------- Refresh button click event
