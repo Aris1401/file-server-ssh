@@ -407,13 +407,19 @@ $("table tbody").on("click", ".edit-btn", function (e) {
   // Fetch file content
   $.get("/api/read-file", { path: path }, function (data) {
     if (data.success) {
-      $("#editFileContent").val(data.content);
       $("#editFileModal").modal("show");
+
+      const mode = getCodeMirrorMode(name);
+      codeMirrorEditor.setOption("mode", mode);
+      codeMirrorEditor.setValue(data.content);
+
+      // Delay setting CodeMirror content until modal is fully shown
+      setTimeout(() => {
+        codeMirrorEditor.setValue(data.content);
+      }, 300);
     } else {
       alert("Failed to load file: " + data.error);
     }
-  }).fail(function (jqXHR, textStatus, errorThrown) {
-    alert("Error loading file: " + errorThrown);
   });
 });
 
@@ -421,7 +427,7 @@ $("#editFileForm").on("submit", function (e) {
   e.preventDefault();
 
   const path = $("#editFilePath").val();
-  const content = $("#editFileContent").val();
+  const content = codeMirrorEditor.getValue();
 
   $.ajax({
     url: "/api/update-file",
@@ -431,7 +437,7 @@ $("#editFileForm").on("submit", function (e) {
     success: function (response) {
       if (response.success) {
         $("#editFileModal").modal("hide");
-        loadFiles(currentPath); // Optional: refresh list
+        loadFiles(currentPath);
       } else {
         alert("Error saving file: " + response.error);
       }
@@ -501,6 +507,17 @@ $("table tbody").on("click", ".rename-btn", function (e) {
 });
 
 $(document).ready(function () {
+    codeMirrorEditor = CodeMirror.fromTextArea(
+        document.getElementById("editFileContent"),
+        {
+          lineNumbers: true,
+          mode: "javascript", // you can change dynamically based on file type
+          theme: "material-darker",
+          tabSize: 2,
+          indentWithTabs: true,
+        }
+      );
+
   // ----------------------------------- Refresh button click event
   $("#refreshBtn").on("click", function () {
     // Show a small loading indicator on the button
@@ -548,3 +565,39 @@ $(document).ready(function () {
     $("#fileList").addClass("d-none").find("ul").empty();
   });
 });
+
+let codeMirrorEditor;
+
+$("#editFileModal").on("shown.bs.modal", function () {
+  if (!codeMirrorEditor) {
+    codeMirrorEditor = CodeMirror.fromTextArea(
+      document.getElementById("editFileContent"),
+      {
+        lineNumbers: true,
+        mode: "javascript", // you can change dynamically based on file type
+        theme: "material-darker",
+        tabSize: 2,
+        indentWithTabs: true,
+      }
+    );
+    codeMirrorEditor.setSize("100%", "500px");
+  } else {
+    codeMirrorEditor.refresh(); // fixes visual issues when re-opening modal
+  }
+});
+
+function getCodeMirrorMode(fileName) {
+    if (fileName.endsWith(".js")) return "javascript";
+    if (fileName.endsWith(".html")) return "htmlmixed";
+    if (fileName.endsWith(".css")) return "css";
+    if (fileName.endsWith(".json")) return "application/json";
+    if (fileName.endsWith(".py")) return "python";
+    if (fileName.endsWith(".php")) return "php";
+    if (fileName.endsWith(".sh")) return "shell";
+    if (fileName.endsWith(".md")) return "markdown";
+    if (fileName.endsWith(".txt")) return "text/plain";
+    if (fileName.endsWith(".xml")) return "xml";
+    if (fileName.endsWith(".yml") || fileName.endsWith(".yaml")) return "yaml";
+    return "text/plain";
+  }
+  

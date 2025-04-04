@@ -26,6 +26,23 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
       rel="stylesheet"
     />
+
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/codemirror@5.65.12/lib/codemirror.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.12/lib/codemirror.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.12/mode/javascript/javascript.js"></script>
+
+    <style>
+      #editFileModal .modal-dialog {
+        max-width: 80%; /* or any percentage/px size you prefer */
+      }
+      #editFileModal .modal-body {
+        max-height: 70vh; /* Adjust this as necessary */
+        overflow-y: auto; /* Ensure content is scrollable if it exceeds the height */
+      }
+    </style>
   </head>
   <body>
     <div class="container my-4">
@@ -52,9 +69,6 @@
             data-bs-target="#createFileModal"
           >
             <i class="bi bi-file-earmark-plus"></i> Create File
-          </button>
-          <button class="btn btn-sm btn-danger" id="deleteBtn">
-            <i class="bi bi-trash"></i> Delete
           </button>
         </div>
       </div>
@@ -271,8 +285,7 @@
               <div class="mb-3">
                 <textarea
                   id="editFileContent"
-                  class="form-control"
-                  rows="15"
+                  name="editFileContent"
                 ></textarea>
               </div>
             </div>
