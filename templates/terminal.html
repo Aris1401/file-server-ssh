@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block additionnal_header %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+{% endblock %}
+
+{% block body %}
+	<div class="container my-4">
+		<h1>Terminal</h1>
+
+		<div id="terminal"></div>
+
+		<script>
+			var domainName = "{{ domain }}"
+			var groupName = "{{ group }}"
+		</script>
+		<script src="/static/js/termimal.js"></script>
+	</div>
+{% endblock %}

@@ -1,8 +1,10 @@
-// Global variable to track the current directory.
-// Starting directory is "public_html"
 var currentPath = ".";
+var connectionInformations = {};
 
-// Update the breadcrumb navigation based on the current path.
+function updateConnectionCommand(command) {
+  $(".connexion-command").text(command);
+}
+
 function updateBreadcrumb(path) {
   var breadcrumbHtml =
     '<li class="breadcrumb-item"><a href="#" class="breadcrumb-home" data-path=".">Home</a></li>';
@@ -23,7 +25,6 @@ function updateBreadcrumb(path) {
   $(".breadcrumb").html(breadcrumbHtml);
 }
 
-// Append a file or folder as a new row in the file table.
 function addFileToList(file) {
   var icon;
   if (file.type === "folder") {
@@ -38,27 +39,22 @@ function addFileToList(file) {
 
   var $row = $("<tr></tr>");
 
-  // If it's a folder, make the entire row clickable.
   if (file.type === "folder") {
     $row.attr("data-dir", file.path);
     $row.css("cursor", "pointer");
-    // No longer wrap the name in an <a>; plain text is enough.
     var nameCell = `<td><i class="bi bi-${icon} me-2"></i>${file.name}</td>`;
     $row.append(nameCell);
   } else {
-    // For files, simply render the name.
     var nameCell = `<td><i class="bi bi-${icon} me-2"></i>${file.name}</td>`;
     $row.append(nameCell);
   }
 
-  // Build the rest of the cells.
   $row.append(
     `<td>${file.type.charAt(0).toUpperCase() + file.type.slice(1)}</td>`
   );
   $row.append(`<td>${file.size !== "-" ? formatSize(file.size) : "-"}</td>`);
   $row.append(`<td>${file.modified}</td>`);
 
-  // Download button for files only
   var downloadBtn =
     file.type === "file"
       ? `<a href="/api/download?path=${encodeURIComponent(
@@ -68,7 +64,6 @@ function addFileToList(file) {
          </a>`
       : "";
 
-  // Add rename button
   var renameBtn = `<button class="btn btn-sm btn-outline-primary me-1 rename-btn" 
                        data-path="${file.path}" 
                        data-name="${file.name}" 
@@ -77,7 +72,6 @@ function addFileToList(file) {
                        <i class="bi bi-pencil"></i>
                      </button>`;
 
-  // Add delete button
   var deleteBtn = `<button class="btn btn-sm btn-outline-danger delete-btn" 
                        data-path="${file.path}" 
                        data-name="${file.name}" 
@@ -108,7 +102,6 @@ function addFileToList(file) {
   $("table tbody").append($row);
 }
 
-// Format file sizes in human-readable format.
 function formatSize(size) {
   if (size < 1024) return size + " B";
   else if (size < 1024 * 1024) return (size / 1024).toFixed(2) + " KB";
@@ -117,39 +110,62 @@ function formatSize(size) {
   else return (size / (1024 * 1024 * 1024)).toFixed(2) + " GB";
 }
 
-// Load files from a given directory and update the table and breadcrumb.
-function loadFiles(dir) {
+function loadFiles(dir, force = false) {
+  var $tbody = $("table tbody");
+  $tbody.empty();
+
+  var loaderHTML = `
+    <tr id="loader-row">
+      <td colspan="100%" class="text-center">
+        <div class="d-flex justify-content-center align-items-center">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <span class="ms-3">Chargement des fichiers...</span>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  $tbody.append(loaderHTML);
+
   currentPath = dir;
   updateBreadcrumb(currentPath);
-  $.get("/api/list", { dir: currentPath }, function (data) {
-    if (data.error) {
-      alert("Error loading files: " + data.error);
-      return;
-    }
-    var $tbody = $("table tbody");
-    $tbody.empty();
-    data.files.forEach(function (file) {
-      addFileToList(file);
-    });
-  }).fail(function (jqXHR, textStatus, errorThrown) {
-    alert("Failed to load files: " + errorThrown);
+  $.ajax({
+    url: "/api/list",
+    method: "GET",
+    data: { dir: currentPath },
+    cache: !force,
+    success: function (data) {
+      $("#loader").remove();
+
+      if (data.error) {
+        toastr.error("Erreur de chargement des fichiers: " + data.error);
+        return;
+      }
+
+      var $tbody = $("table tbody");
+      $tbody.empty();
+      data.files.forEach(function (file) {
+        addFileToList(file);
+      });
+    },
+    error: function (jqXHR, textStatus, errorThrown) {
+      $("#loader").remove();
+      toastr.error("Erreur de chargement des fichiers: " + errorThrown);
+    },
   });
 }
 
-// Document ready handler
 $(document).ready(function () {
-  // Initial load of files for the starting directory.
   loadFiles(currentPath);
 
-  // Delegate click event for folder rows.
   $("table tbody").on("click", "tr[data-dir]", function (e) {
-    // Prevent click if user clicks on an interactive element like a button or link.
     if ($(e.target).closest("a, button").length > 0) return;
     var newDir = $(this).data("dir");
     loadFiles(newDir);
   });
 
-  // Delegate click event for breadcrumb links.
   $(".breadcrumb").on(
     "click",
     ".breadcrumb-link, .breadcrumb-home",
@@ -161,7 +177,6 @@ $(document).ready(function () {
   );
 });
 
-// Handle new folder creation
 function handleCreateFolderSubmit(e) {
   e.preventDefault();
 
@@ -184,10 +199,8 @@ function handleCreateFolderSubmit(e) {
     }),
     success: function (response) {
       if (response.success) {
-        // Close modal and reload current directory
         $("#createFolderModal").modal("hide");
         loadFiles(currentPath);
-        // Clear form field
         $("#foldername").val("");
       } else {
         alert("Error creating folder: " + response.error);
@@ -199,7 +212,6 @@ function handleCreateFolderSubmit(e) {
   });
 }
 
-// Handle file creation form submission
 function handleCreateFileSubmit(e) {
   e.preventDefault();
 
@@ -223,10 +235,8 @@ function handleCreateFileSubmit(e) {
     }),
     success: function (response) {
       if (response.success) {
-        // Close modal and reload current directory
         $("#createFileModal").modal("hide");
         loadFiles(currentPath);
-        // Clear form fields
         $("#filename").val("");
         $("#filecontent").val("");
       } else {
@@ -239,7 +249,6 @@ function handleCreateFileSubmit(e) {
   });
 }
 
-// Handle file upload
 function handleFileUpload(e) {
   e.preventDefault();
 
@@ -252,18 +261,21 @@ function handleFileUpload(e) {
   const files = fileInput.files;
   const formData = new FormData();
 
-  // Append all files to the form data
+  const uploadId = Date.now().toString();
+  formData.append("uploadId", uploadId);
+
   for (let i = 0; i < files.length; i++) {
     formData.append("files", files[i]);
   }
 
-  formData.append("path", currentPath); // Add current path
+  formData.append("path", currentPath);
 
-  // Show progress bar
   const progressBar = $("#uploadProgress");
   const progressBarInner = progressBar.find(".progress-bar");
   progressBar.removeClass("d-none");
   progressBarInner.css("width", "0%");
+
+  pollProgress(uploadId);
 
   $.ajax({
     url: "/api/upload-multiple",
@@ -271,46 +283,66 @@ function handleFileUpload(e) {
     data: formData,
     processData: false,
     contentType: false,
-    xhr: function () {
-      const xhr = new window.XMLHttpRequest();
-      xhr.upload.addEventListener(
-        "progress",
-        function (e) {
-          if (e.lengthComputable) {
-            const percent = Math.round((e.loaded / e.total) * 100);
-            progressBarInner.css("width", percent + "%");
-            progressBarInner.text(percent + "%");
-          }
-        },
-        false
-      );
-      return xhr;
-    },
     success: function (response) {
       if (response.success) {
-        // Show success message with number of files uploaded
         const filesUploaded = response.filesUploaded || 0;
         alert(`Successfully uploaded ${filesUploaded} file(s)`);
 
-        // Close modal and reload current directory
         $("#uploadModal").modal("hide");
         loadFiles(currentPath);
 
-        // Clear form and file list
         $("#uploadForm")[0].reset();
         $("#fileList").addClass("d-none").find("ul").empty();
 
-        // Hide progress bar
         progressBar.addClass("d-none");
       } else {
         alert("Error uploading files: " + response.error);
       }
     },
     error: function (jqXHR, textStatus, errorThrown) {
+      console.log(errorThrown);
       alert("Failed to upload files: " + errorThrown);
       progressBar.addClass("d-none");
     },
   });
+}
+
+function pollProgress(uploadId) {
+  let tries = 0;
+
+  const interval = setInterval(() => {
+    $.ajax({
+      url: `/api/upload-progress?uploadId=${uploadId}`,
+      method: "GET",
+      success: function (data) {
+        if (data.error) {
+          tries += 1;
+
+          if (tries >= 5) {
+            clearInterval(interval);
+            alert("Upload failed: " + data.error);
+            return;
+          }
+        }
+
+        const percent = Math.round(data.progress);
+        progressBarInner.css("width", percent + "%");
+        progressBarInner.text(percent + "%");
+
+        if (percent >= 100) {
+          clearInterval(interval);
+        }
+      },
+      error: function () {
+        tries += 1;
+
+        if (tries >= 5) {
+          clearInterval(interval);
+          alert("Upload failed: Network error");
+        }
+      },
+    });
+  }, 500);
 }
 
 function handleDelete(path, name, isFolder) {
@@ -330,7 +362,6 @@ function handleDelete(path, name, isFolder) {
       }),
       success: function (response) {
         if (response.success) {
-          // Reload current directory
           loadFiles(currentPath);
         } else {
           alert(
@@ -354,18 +385,16 @@ function handleRename(oldPath, oldName, isFolder) {
   );
 
   if (!newName || newName === oldName) {
-    return; // User canceled or didn't change the name
+    return;
   }
 
-  // Calculate new path based on current directory
   let newPath;
   if (currentPath === ".") {
     newPath = newName;
   } else {
-    // Get parent directory from old path
     const pathParts = oldPath.split("/");
-    pathParts.pop(); // Remove filename/foldername
-    pathParts.push(newName); // Add new name
+    pathParts.pop();
+    pathParts.push(newName);
     newPath = pathParts.join("/");
   }
 
@@ -379,7 +408,6 @@ function handleRename(oldPath, oldName, isFolder) {
     }),
     success: function (response) {
       if (response.success) {
-        // Reload current directory
         loadFiles(currentPath);
       } else {
         alert(
@@ -393,18 +421,29 @@ function handleRename(oldPath, oldName, isFolder) {
   });
 }
 
-// DEdit
+// Obtenir les informations de la connection
+function getConnectionInformations() {
+  $.ajax({
+    url: "api/infos",
+    contentType: "application/json",
+    success: (response) => {
+      connectionInformations = response.data;
+
+      // Mettre a jour les informations de connextion SSH
+      updateConnectionCommand(connectionInformations.cmd);
+    },
+  });
+}
+
 $("table tbody").on("click", ".edit-btn", function (e) {
   e.stopPropagation();
 
   const path = $(this).data("path");
   const name = $(this).data("name");
 
-  // Store path
   $("#editFilePath").val(path);
   $("#editFileModalLabel").text(`Editing: ${name}`);
 
-  // Fetch file content
   $.get("/api/read-file", { path: path }, function (data) {
     if (data.success) {
       $("#editFileModal").modal("show");
@@ -413,7 +452,6 @@ $("table tbody").on("click", ".edit-btn", function (e) {
       codeMirrorEditor.setOption("mode", mode);
       codeMirrorEditor.setValue(data.content);
 
-      // Delay setting CodeMirror content until modal is fully shown
       setTimeout(() => {
         codeMirrorEditor.setValue(data.content);
       }, 300);
@@ -448,15 +486,12 @@ $("#editFileForm").on("submit", function (e) {
   });
 });
 
-// Delegate click event for folder rows.
 $("table tbody").on("click", "tr[data-dir]", function (e) {
-  // Prevent click if user clicks on an interactive element like a button or link.
   if ($(e.target).closest("a, button").length > 0) return;
   var newDir = $(this).data("dir");
   loadFiles(newDir);
 });
 
-// Delegate click event for breadcrumb links.
 $(".breadcrumb").on(
   "click",
   ".breadcrumb-link, .breadcrumb-home",
@@ -469,6 +504,8 @@ $(".breadcrumb").on(
 
 // ----------------------------------- File upload form submission handler
 $("#fileUpload").on("change", function () {
+  getConnectionInformations();
+
   const fileList = $("#fileList");
   const fileListUl = fileList.find("ul");
   fileListUl.empty();
@@ -479,9 +516,23 @@ $("#fileUpload").on("change", function () {
     for (let i = 0; i < this.files.length; i++) {
       const file = this.files[i];
       const size = formatSize(file.size);
-      fileListUl.append(`<li class="list-group-item d-flex justify-content-between align-items-center">
-          <span>${file.name}</span>
-          <span class="badge bg-secondary">${size}</span>
+
+      const copyPath = currentPath.replace(
+        ".",
+        "/mnt/www/" + connectionInformations.domain
+      );
+
+      fileListUl.append(`
+        <li class="list-group-item d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-center">
+            <span>${file.name}</span>
+            <span class="badge bg-secondary">${size}</span>
+          </div>
+          <span class="mt-2">
+            <p class="border rounded p-3 text-nowrap bg-black text-white overflow-auto">
+              scp -P 2222 -o "ProxyJump=bastion@${connectionInformations.infra}.linkuma.ovh:2200" "[CHEMIN]\\${file.name}" ${connectionInformations.domain}@apache.group${connectionInformations.group}.svc.cluster.local:${copyPath}
+            </p>
+          </span>
         </li>`);
     }
   } else {
@@ -490,16 +541,15 @@ $("#fileUpload").on("change", function () {
 });
 
 $("table tbody").on("click", ".delete-btn", function (e) {
-  e.stopPropagation(); // Prevent row click for folders
+  e.stopPropagation();
   const path = $(this).data("path");
   const name = $(this).data("name");
   const isFolder = $(this).data("type") === "folder";
   handleDelete(path, name, isFolder);
 });
 
-// Rename button click handler - using event delegation
 $("table tbody").on("click", ".rename-btn", function (e) {
-  e.stopPropagation(); // Prevent row click for folders
+  e.stopPropagation();
   const path = $(this).data("path");
   const name = $(this).data("name");
   const isFolder = $(this).data("type") === "folder";
@@ -507,20 +557,22 @@ $("table tbody").on("click", ".rename-btn", function (e) {
 });
 
 $(document).ready(function () {
-    codeMirrorEditor = CodeMirror.fromTextArea(
-        document.getElementById("editFileContent"),
-        {
-          lineNumbers: true,
-          mode: "javascript", // you can change dynamically based on file type
-          theme: "material-darker",
-          tabSize: 2,
-          indentWithTabs: true,
-        }
-      );
+  // Obtenir les informations de la connection
+  getConnectionInformations();
+
+  codeMirrorEditor = CodeMirror.fromTextArea(
+    document.getElementById("editFileContent"),
+    {
+      lineNumbers: true,
+      mode: "javascript",
+      theme: "material-darker",
+      tabSize: 2,
+      indentWithTabs: true,
+    }
+  );
 
   // ----------------------------------- Refresh button click event
   $("#refreshBtn").on("click", function () {
-    // Show a small loading indicator on the button
     const $btn = $(this);
     const originalHtml = $btn.html();
     $btn.html(
@@ -528,10 +580,8 @@ $(document).ready(function () {
     );
     $btn.prop("disabled", true);
 
-    // Reload files for the current path
-    loadFiles(currentPath);
+    loadFiles(currentPath, true);
 
-    // Reset button after a short delay
     setTimeout(function () {
       $btn.html(originalHtml);
       $btn.prop("disabled", false);
@@ -539,13 +589,10 @@ $(document).ready(function () {
   });
 
   // ----------------------------------- Create file button click event
-  // Create file form submission handler
   $("#createFileForm").on("submit", handleCreateFileSubmit);
 
-  // Create folder form submission handler
   $("#createFolderForm").on("submit", handleCreateFolderSubmit);
 
-  // Reset modal forms when hidden to clear inputs
   $("#createFileModal, #createFolderModal").on("hidden.bs.modal", function () {
     $(this).find("form")[0].reset();
   });
@@ -555,10 +602,8 @@ $(document).ready(function () {
     $("#uploadModal").modal("show");
   });
 
-  // Upload form submission
   $("#uploadForm").on("submit", handleFileUpload);
 
-  // Reset upload form and hide progress bar when modal is closed
   $("#uploadModal").on("hidden.bs.modal", function () {
     $(this).find("form")[0].reset();
     $("#uploadProgress").addClass("d-none");
@@ -574,7 +619,7 @@ $("#editFileModal").on("shown.bs.modal", function () {
       document.getElementById("editFileContent"),
       {
         lineNumbers: true,
-        mode: "javascript", // you can change dynamically based on file type
+        mode: "javascript",
         theme: "material-darker",
         tabSize: 2,
         indentWithTabs: true,
@@ -582,22 +627,21 @@ $("#editFileModal").on("shown.bs.modal", function () {
     );
     codeMirrorEditor.setSize("100%", "500px");
   } else {
-    codeMirrorEditor.refresh(); // fixes visual issues when re-opening modal
+    codeMirrorEditor.refresh();
   }
 });
 
 function getCodeMirrorMode(fileName) {
-    if (fileName.endsWith(".js")) return "javascript";
-    if (fileName.endsWith(".html")) return "htmlmixed";
-    if (fileName.endsWith(".css")) return "css";
-    if (fileName.endsWith(".json")) return "application/json";
-    if (fileName.endsWith(".py")) return "python";
-    if (fileName.endsWith(".php")) return "php";
-    if (fileName.endsWith(".sh")) return "shell";
-    if (fileName.endsWith(".md")) return "markdown";
-    if (fileName.endsWith(".txt")) return "text/plain";
-    if (fileName.endsWith(".xml")) return "xml";
-    if (fileName.endsWith(".yml") || fileName.endsWith(".yaml")) return "yaml";
-    return "text/plain";
-  }
-  
+  if (fileName.endsWith(".js")) return "javascript";
+  if (fileName.endsWith(".html")) return "htmlmixed";
+  if (fileName.endsWith(".css")) return "css";
+  if (fileName.endsWith(".json")) return "application/json";
+  if (fileName.endsWith(".py")) return "python";
+  if (fileName.endsWith(".php")) return "php";
+  if (fileName.endsWith(".sh")) return "shell";
+  if (fileName.endsWith(".md")) return "markdown";
+  if (fileName.endsWith(".txt")) return "text/plain";
+  if (fileName.endsWith(".xml")) return "xml";
+  if (fileName.endsWith(".yml") || fileName.endsWith(".yaml")) return "yaml";
+  return "text/plain";
+}

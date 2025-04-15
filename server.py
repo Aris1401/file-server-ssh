@@ -1,20 +1,47 @@
-from flask import Flask, request, jsonify, send_file, render_template, url_for
+from flask import Flask, request, jsonify, send_file, render_template, url_for, session, redirect, flash
 import paramiko
 import io
 import os
 import stat
+import time
 from datetime import datetime
 
-app = Flask(__name__)
+from throttled_stream import ThrottledStream
 
-@app.route('/')
+app = Flask(__name__)
+app.secret_key = 'tsarajoro-key'
+
+# Prendre en compte l'avencement des uploads
+upload_progress = {}
+
+@app.route('/files')
 def index():
-    """Simple index route."""
     return render_template('index.html')
+
+@app.route('/', methods=['GET'])
+def login():
+    return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def do_login():
+    domain_name = request.form['domainName']
+    group = request.form['group']
+    infra = request.form['infra']
+
+    session['domain_name'] = domain_name
+    session['group'] = group
+    session['infra'] = infra
+
+    flash("Connexion reussi")
+    
+    return redirect(url_for('index'))
+
+@app.route('/terminal', methods=['GET'])
+def terminal():
+    return render_template('terminal.html', domain=session['domain_name'], group=session['group'])
 
 # ----------------- API ----------------------
 
-# Configuration for your SSH connection
 SSH_CONFIG = {
     'ip': "localhost",
     'port': 22,
@@ -22,8 +49,32 @@ SSH_CONFIG = {
     'password': "iantenaina"
 }
 
+# def create_ssh_connection():
+#     bastion_host =  session['infra'] + '.linkuma.ovh'
+#     bastion_port = 2200
+#     bastion_user = 'bastion'
+#     bastion_key = 'D:/ssh/tech-tsarajoro'
+
+#     final_host = 'apache.group' + session['group'] + '.svc.cluster.local'
+#     final_port = 2222
+
+#     bastion_client = paramiko.SSHClient()
+#     bastion_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+#     bastion_client.connect(bastion_host, port=bastion_port, username=bastion_user, key_filename=bastion_key)
+
+#     bastion_transport = bastion_client.get_transport()
+#     dest_addr = (final_host, final_port)
+
+#     channel = bastion_transport.open_channel('direct-tcpip', dest_addr, ('localhost', 0))
+
+#     final_client = paramiko.SSHClient()
+#     final_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#     final_client.connect(final_host, port=final_port, username=session['domain_name'], sock=channel)
+
+#     return final_client
+
 def create_ssh_connection():
-    """Creates and returns a connected SSH client."""
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(
@@ -34,9 +85,19 @@ def create_ssh_connection():
     )
     return client
 
+@app.route('/api/infos', methods=['GET'])
+def get_connection_infos():
+    infos = {
+        'domain': session['domain_name'],
+        'group': session['group'],
+        'infra': session['infra'],
+        'cmd': 'ssh -o "ProxyJump=bastion@' + session['infra'] + '.linkuma.ovh:2200" -p 2222 ' + session['domain_name'] + '@apache.group' + session['group'] + '.svc.cluster.local' 
+    }
+
+    return jsonify({ 'data': infos })
+
 @app.route('/api/list', methods=['GET'])
 def list_files():
-    """List files in the specified directory on the remote Linux server with metadata."""
     directory = request.args.get('dir', '.')  # default directory is '.'
     try:
         ssh_client = create_ssh_connection()
@@ -60,6 +121,12 @@ def list_files():
 
         sftp.close()
         ssh_client.close()
+
+        files.sort(key= lambda file: file['name'])
+        files.reverse()
+        files.sort(key= lambda file: file['is_dir'])
+        files.reverse()
+
         return jsonify({'files': files})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -87,7 +154,6 @@ def download_file():
 
 @app.route('/api/create-file', methods=['POST'])
 def create_file():
-    """Create a new file on the remote server."""
     try:
         data = request.json
         file_path = data.get('path')
@@ -99,7 +165,6 @@ def create_file():
         ssh_client = create_ssh_connection()
         sftp = ssh_client.open_sftp()
         
-        # Create file with content
         with sftp.file(file_path, 'w') as f:
             f.write(content)
             
@@ -123,7 +188,6 @@ def create_folder():
         ssh_client = create_ssh_connection()
         sftp = ssh_client.open_sftp()
         
-        # Create directory
         sftp.mkdir(folder_path)
             
         sftp.close()
@@ -133,41 +197,68 @@ def create_folder():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Callback de pourcentage d'upload
+def progress_callback(upload_id, filename, total_size, bytes_transferred):
+    """Callback function for tracking progress of a single file."""
+    progress = 100
+
+    print(f'Total Size: {total_size}')
+
+    if (total_size > 0):
+        progress = (bytes_transferred / total_size) * 100
+    
+    upload_progress[upload_id] = {
+        'filename': filename,
+        'progress': progress
+    }
+    
+    print(f"Upload {filename}: {progress:.2f}% done.")
+
 @app.route('/api/upload-multiple', methods=['POST'])
 def upload_multiple_files():
-    """Upload multiple files to the remote server."""
     try:
-        # Check if files are included in request
+        upload_id = request.form.get('uploadId')
+        if not upload_id:
+            upload_id = str(request.cookies.get("uploadId"))
+
+        if not upload_id:
+            upload_id = str(time.time())
+
         if 'files' not in request.files:
             return jsonify({'error': 'No file part'}), 400
             
+        upload_progress[upload_id] = {'progress': 0}
+
         files = request.files.getlist('files')
-        
-        # If no files were selected
+
         if len(files) == 0 or files[0].filename == '':
             return jsonify({'error': 'No selected files'}), 400
             
-        # Get destination path
         path = request.form.get('path', '.')
             
-        # Create SSH connection
         ssh_client = create_ssh_connection()
         sftp = ssh_client.open_sftp()
         
         files_uploaded = 0
         
-        # Upload each file
         for file in files:
             if file.filename:
-                # Get the full path where to save the file
                 if path == '.':
                     dest_path = file.filename
                 else:
                     dest_path = path.rstrip('/') + '/' + file.filename
                 
-                # Upload the file
-                file_obj = io.BytesIO(file.read())
-                sftp.putfo(file_obj, dest_path)
+                file_data = file.read()
+                total_size = len(file_data)
+
+                # Wrap in BytesIO, then ThrottledStream
+                file_buffer = io.BytesIO(file_data)
+                
+                slow_stream = ThrottledStream(file_buffer, chunk_size=4096, delay=0.02)
+                
+                # Modified version
+                # The correct version
+                sftp.putfo(slow_stream, dest_path, callback=lambda bytes_transferred, total_size_sftp: progress_callback(upload_id, file.filename, total_size, bytes_transferred))
                 files_uploaded += 1
         
         sftp.close()
@@ -179,11 +270,19 @@ def upload_multiple_files():
             'filesUploaded': files_uploaded
         })
     except Exception as e:
+        print(e)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/upload-progress')
+def upload_progress_status():
+    """Return the current upload progress for a given upload ID."""
+    progress = upload_progress.get(request.args.get('uploadId'))
+    if not progress:
+        return jsonify({'error': 'Invalid upload ID'}), 404
+    return jsonify(progress)
 
 @app.route('/api/delete', methods=['POST'])
 def delete_item():
-    """Delete a file or folder on the remote server."""
     try:
         data = request.json
         item_path = data.get('path')
@@ -194,26 +293,19 @@ def delete_item():
         ssh_client = create_ssh_connection()
         sftp = ssh_client.open_sftp()
         
-        # Check if it's a directory or file
         try:
-            # Try to get attributes to determine if file or directory
             attr = sftp.stat(item_path)
             is_dir = stat.S_ISDIR(attr.st_mode)
             
             if is_dir:
-                # For directories, we need to use SSH commands as SFTP doesn't have recursive delete
-                # First check if directory is empty
                 files = sftp.listdir(item_path)
                 if files:
-                    # Non-empty directory requires recursive delete
                     ssh_stdin, ssh_stdout, ssh_stderr = ssh_client.exec_command(f"rm -rf '{item_path}'")
                     if ssh_stderr.read():
                         return jsonify({'error': 'Failed to delete directory'}), 500
                 else:
-                    # Empty directory can be removed with SFTP
                     sftp.rmdir(item_path)
             else:
-                # For files, we can use SFTP's remove
                 sftp.remove(item_path)
             
             sftp.close()
@@ -227,7 +319,6 @@ def delete_item():
 
 @app.route('/api/rename', methods=['POST'])
 def rename_item():
-    """Rename a file or folder on the remote server."""
     try:
         data = request.json
         old_path = data.get('oldPath')
@@ -239,7 +330,6 @@ def rename_item():
         ssh_client = create_ssh_connection()
         sftp = ssh_client.open_sftp()
         
-        # Rename the item (works for both files and directories)
         sftp.rename(old_path, new_path)
         
         sftp.close()
@@ -279,3 +369,43 @@ def update_file():
         return jsonify(success=True)
     except Exception as e:
         return jsonify(success=False, error=str(e)), 500
+
+@app.route('/api/exec', methods=['POST'])
+def execute_command():
+    data = request.get_json()
+    command = data.get('command')
+
+    if not command:
+        return jsonify(success=False, error="Missing 'command'"), 400
+
+    try:
+        ssh_client = create_ssh_connection()
+        stdin, stdout, stderr = ssh_client.exec_command(command)
+        result = stdout.read().decode('utf-8')
+        error = stderr.read().decode('utf-8')
+
+        if error:
+            print(error)
+            return jsonify(success=False, error=error), 500
+
+        formatted_result = format_table_for_terminal(result)
+
+        return jsonify(success=True, result=formatted_result)
+
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500
+
+def format_table_for_terminal(result):
+    # You may want to split the result into rows and columns based on your command's output
+    # Here we assume the result is space-separated, but this can vary based on your command
+
+    lines = result.splitlines()
+    formatted_result = []
+
+    for line in lines:
+        # Split each line into columns (assuming space separation for simplicity)
+        columns = line.split()
+        formatted_result.append(" | ".join(columns))  # Join columns with " | " for a table-like format
+    
+    # Join all the formatted lines into a single string with new lines
+    return "\n".join(formatted_result)

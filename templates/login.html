@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+
+{% block body %}
+<div class="container">
+    <div class="login-form">
+        <h2 class="text-center mb-4">Login</h2>
+        <form action="/login" method="POST">
+            <!-- Domain Name (Text) -->
+            <div class="mb-3">
+                <label for="domainName" class="form-label">Domain Name</label>
+                <input type="text" class="form-control" id="domainName" name="domainName" required placeholder="Enter your domain name">
+            </div>
+
+            <div class="mb-3">
+                <label for="infra" class="form-label">Infra</label>
+                <select name="infra" id="infra" class="form-control">
+                    <option value="infra">infra</option>
+                    <option value="infra2">infra2</option>
+                    <option value="infra3">infra3</option>
+                </select>
+            </div>
+
+            <!-- Group (Number) -->
+            <div class="mb-3">
+                <label for="group" class="form-label">Group</label>
+                <input type="number" class="form-control" id="group" name="group" required placeholder="Enter your group number">
+            </div>
+
+            <!-- Submit Button -->
+            <div class="d-grid">
+                <button type="submit" class="btn btn-primary">Login</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
